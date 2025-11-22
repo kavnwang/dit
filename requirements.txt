@@ -1,0 +1,9 @@
+datasets
+einops
+torch
+torchvision
+tqdm
+transformers
+wandb
+hf_transfer
+plotly

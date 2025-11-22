@@ -1,0 +1,10 @@
+{
+    "epochs": 10,
+    "vae_iters": 20,
+    "gan_iters": 10,
+    "batch_size": 64,
+    "lr": 2e-4,
+    "weight_decay": 0.05,
+    "betas": [0.9, 0.999],
+    "kl_weight": 2e-3
+}
