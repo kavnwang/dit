@@ -87,7 +87,7 @@ for epoch in range(job['epochs']):
         labels = labels.to(device)
         t = torch.randint(0, 4000, (imgs.shape[0],)).to(device)
         error, noised_z = noise(imgs, t)
-        noise_pred, _ = model(noised_z, labels, t)
+        noise_pred = model(noised_z, labels, t)
         loss = loss_mse(noise_pred, error)
         loss.backward()
         optimizer.step()

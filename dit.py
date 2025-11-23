@@ -166,7 +166,7 @@ class DiT(nn.Module):
         self.pos_embeddings = nn.Embedding(self.patch_len, self.hidden_dim)
         self.post_norm = nn.LayerNorm(self.hidden_dim)
         self.post_linear = nn.Linear(self.hidden_dim, patches * patches * 6)
-        self.upsample = nn.ConvTranspose2d(6, 6, 4, 2, 1)
+        self.upsample = nn.ConvTranspose2d(6, 3, 4, 2, 1)
 
     
     def forward(self, z: torch.Tensor, label: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -182,7 +182,5 @@ class DiT(nn.Module):
         hidden_states = torch.reshape(hidden_states, (z.shape[0], 8, 8, 6, 6, 6))
         hidden_states = hidden_states.permute(0, 1, 3, 2, 4, 5)
         hidden_states  = hidden_states.reshape((-1, 6, 32, 32))
-        output = self.upsample(hidden_states)
-        noise = output[:,:3,...]
-        sigma = output[:,3:,...]
-        return noise, sigma
+        noise = self.upsample(hidden_states)
+        return noise
