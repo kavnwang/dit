@@ -79,8 +79,6 @@ def noise(z: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
     noised_z = (alpha ** 0.5) * z + ((1 - alpha) ** 0.5) * noise
     return noise, noised_z
 
-
-
 for epoch in range(job['epochs']):
     for step, (imgs, labels) in enumerate(tqdm(train_loader)):
         imgs = imgs.to(device)
@@ -92,14 +90,12 @@ for epoch in range(job['epochs']):
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-        if step % 100 == 0:
+        if step == len(train_loader) - 1:
+            print(f"Epoch {epoch+1}/{job['epochs']}")
             print(f"Loss: {loss.item()}")
             alpha = alpha_bar[t][:,None,None,None].to(device)
             output = (noised_z[:16] - (1 - alpha[:16]) ** 0.5 * noise_pred[:16]) / (alpha[:16] ** 0.5)
             display_data(output, 4, f"Epoch {epoch+1} Output")
-
-        if step == len(train_loader) - 1:
-            print(f"Epoch {epoch+1}/{job['epochs']}")
             if (epoch) % 20 == 0:
                 checkpoint_dir = 'checkpoints'
                 os.makedirs(checkpoint_dir, exist_ok=True)
