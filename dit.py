@@ -20,18 +20,16 @@ class Attention(nn.Module):
 
     def forward(self, x: torch.Tensor, alpha_2: torch.Tensor, rho_2: torch.Tensor, beta_2: torch.Tensor) -> torch.Tensor:
         hidden_states = x
-        hidden_states = self.pre_norm(hidden_states) * rho_2 + beta_2
-        q_proj = self.q(hidden_states).reshape((-1, -1, self.heads, self.hidden_dim // self.heads)).transpose(1,2) #b h s d
-        k_proj = self.k(hidden_states).reshape((-1, -1, self.heads, self.hidden_dim // self.heads)).transpose(1,2) #b h t d
-        v_proj = self.v(hidden_states).reshape((-1, -1, self.heads, self.hidden_dim // self.heads)).transpose(1,2)
+        hidden_states = self.pre_norm(hidden_states) * rho_2.unsqueeze(1)+ beta_2.unsqueeze(1)
+        q_proj = self.q(hidden_states).reshape((x.shape[0], -1, self.heads, self.hidden_dim // self.heads)).transpose(1,2) #b h s d
+        k_proj = self.k(hidden_states).reshape((x.shape[0], -1, self.heads, self.hidden_dim // self.heads)).transpose(1,2) #b h t d
+        v_proj = self.v(hidden_states).reshape((x.shape[0], -1, self.heads, self.hidden_dim // self.heads)).transpose(1,2)
         attention_scores = (q_proj @ k_proj.transpose(-1,-2)) / (self.hidden_dim // self.heads) ** 0.5
-        mask = torch.tril(torch.ones(x.size(1), x.size(1))).bool()
-        attention_scores = torch.where(mask, attention_scores, float('-inf'))
         attention_scores = torch.softmax(attention_scores, -1)
         values = attention_scores @ v_proj
-        values = values.reshape(x.shape)
+        values = values.transpose(1,2).reshape(x.shape)
         hidden_states = self.o(values)
-        hidden_states = hidden_states * alpha_2
+        hidden_states = hidden_states * alpha_2.unsqueeze(1)
         return hidden_states + x
     
 class MLP(nn.Module):
@@ -49,11 +47,11 @@ class MLP(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_dim, self.hidden_dim)
     
     def forward(self, x: torch.Tensor, alpha_1: torch.Tensor, rho_1: torch.Tensor, beta_1: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.pre_norm(x) * rho_1 + beta_1
+        hidden_states = self.pre_norm(x) * rho_1.unsqueeze(1) + beta_1.unsqueeze(1)
         hidden_states = self.up_proj(hidden_states)
         hidden_states = self.silu(hidden_states)
         hidden_states = self.down_proj(hidden_states)
-        hidden_states = hidden_states * alpha_1
+        hidden_states = hidden_states * alpha_1.unsqueeze(1)
         return hidden_states + x
 
 class Conditioner(nn.Module):
@@ -73,17 +71,18 @@ class Conditioner(nn.Module):
         self.time_up_proj = nn.Linear(self.embedding_dim, self.time_intermediate_dim)
         self.silu = nn.SiLU()
         self.time_down_proj = nn.Linear(self.time_intermediate_dim, self.embedding_dim)
-        self.time_mlp = nn.Sequential(self.time_up_proj, self.time_mlp, self.time_down_proj)
+        self.time_mlp = nn.Sequential(self.time_up_proj, self.silu, self.time_down_proj)
 
-    def sinusodial_embedding(self, timestep: float) -> torch.Tensor:
+    def sinusodial_embedding(self, timestep: torch.Tensor) -> torch.Tensor:
         half_dim = self.embedding_dim // 2
         freq = torch.exp(-math.log(10000) * torch.arange(half_dim, device=timestep.device) / half_dim)
         args = timestep[:, None] * freq[None, :]
-        embedding = torch.cat(torch.sin(args), torch.cos(args), dim=-1)
+        embedding = torch.cat((torch.sin(args), torch.cos(args)), dim=-1)
         return embedding
 
-    def forward(self, label: torch.Tensor, timestep: float) -> torch.Tensor:
-        label = torch.where(torch.rand_like(label) < self.condition_p, self.num_classes, label)
+    def forward(self, label: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        
+        label = torch.where(torch.rand(label.shape, device=label.device) < self.condition_p, torch.tensor(self.num_classes, dtype=label.dtype, device=label.device), label)
         class_embedding = self.class_embedding(label)
         time_embedding = self.sinusodial_embedding(timestep)
         return class_embedding + self.time_mlp(time_embedding)
@@ -157,40 +156,30 @@ class DiT(nn.Module):
         
         self.conv = nn.Conv2d(3, 4, 3, 2, 1)
         self.patch_conv = nn.Conv2d(4, self.hidden_dim, patches, patches)
-        self.flatten = nn.Flatten()
         self.conditioner = Conditioner()
         self.blocks = nn.ModuleList()
         self.condition_blocks = nn.ModuleList()
         for _ in range(self.num_blocks):
             self.blocks.append(Block(hidden_dim, heads))
             self.condition_blocks.append(AdaLN(hidden_dim=self.hidden_dim)) #TODO
-        s = torch.linspace(0,1,T+1)
-        self.noise_schedule = torch.cos(((s + eps) / (1 + eps)) * math.pi / 2) ** 2 # we use cosine between even when t = 0.5, it's still easy
-        self.noise_schedule = self.noise_schedule / self.noise_schedule[0]
-        num_patches = self.img_size // patches
+        num_patches = 32 // patches
         self.patch_len = num_patches * num_patches
         self.pos_embeddings = nn.Embedding(self.patch_len, self.hidden_dim)
         self.post_norm = nn.LayerNorm(self.hidden_dim)
-        self.up_proj = nn.Linear(self.hidden_dim, 32 * 32 * 8)
+        self.up_proj = nn.Linear(self.hidden_dim, 64 * 6)
 
-    def noise(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        t = torch.randint(0, self.T, (z.shape[0],))
-        noise_amount = self.noise_schedule[t]
-        noise = torch.randn_like(z)
-        noised_z = noise_amount * z + (1 - noise_amount) ** 0.5 * noise
-        return noise, noised_z
     
     def forward(self, z: torch.Tensor, label: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         emb = self.conditioner(label, t)
-        hidden_states = self.flatten(self.patch_conv(self.conv(z)))
-        pos_embedding = self.pos_embeddings(torch.arange(self.patch_len)[None,:].expand(z.shape[0],-1))
+        hidden_states = self.patch_conv(self.conv(z)).reshape(z.shape[0],-1,self.hidden_dim)
+        pos_embedding = self.pos_embeddings(torch.arange(self.patch_len, device=z.device)[None,:].expand(hidden_states.shape[0],-1))
         hidden_states = hidden_states + pos_embedding
         for layer, embedding in zip(self.blocks, self.condition_blocks):
             scales = embedding(emb)
             hidden_states = layer(hidden_states, scales)
         hidden_states = self.post_norm(hidden_states)
         output = self.up_proj(hidden_states)
-        output = output.reshape((32, 32, 8))
-        noise = output[...,:4]
-        sigma = output[...,4:]
+        output = output.reshape((-1, 64, 64, 6))
+        noise = output[...,:3].transpose(1,-1)
+        sigma = output[...,3:].transpose(1,-1)
         return noise, sigma

@@ -8,3 +8,4 @@ wandb
 hf_transfer
 plotly
 huggingface_hub
+matplotlib
