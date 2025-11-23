@@ -7,3 +7,4 @@ transformers
 wandb
 hf_transfer
 plotly
+huggingface_hub
