@@ -20,6 +20,7 @@ transform = transforms.Compose(
     [
         transforms.Resize(64),
         transforms.ToTensor(),
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
     ]
 )
 
@@ -75,7 +76,7 @@ alpha_bar = alpha_bar.to(device)
 def noise(z: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     alpha = alpha_bar[t][:,None,None,None].to(z.device)
     noise = torch.randn_like(z).to(z.device)
-    noised_z = alpha * z + (1 - alpha) ** 0.5 * noise
+    noised_z = (alpha ** 0.5) * z + ((1 - alpha) ** 0.5) * noise
     return noise, noised_z
 
 
@@ -93,8 +94,20 @@ for epoch in range(job['epochs']):
         optimizer.zero_grad()
         if step % 100 == 0:
             print(f"Loss: {loss.item()}")
-            output = (noised_z[:16] - noise_pred[:16] * (1 - alpha_bar[t][:16,None,None,None]) ** 0.5 ) / alpha_bar[t][:16,None,None,None]
+            alpha = alpha_bar[t][:,None,None,None].to(device)
+            output = (noised_z[:16] - (1 - alpha[:16]) ** 0.5 * noise_pred[:16]) / (alpha[:16] ** 0.5)
             display_data(output, 4, f"Epoch {epoch+1} Output")
 
         if step == len(train_loader) - 1:
             print(f"Epoch {epoch+1}/{job['epochs']}")
+            if (epoch) % 20 == 0:
+                checkpoint_dir = 'checkpoints'
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                checkpoint_path = os.path.join(checkpoint_dir, f'dit_epoch_{epoch+1}.pt')
+                torch.save({
+                    'epoch': epoch + 1,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'loss': loss.item(),
+                }, checkpoint_path)
+                print(f"Saved checkpoint to {checkpoint_path}")

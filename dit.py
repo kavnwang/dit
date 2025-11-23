@@ -7,7 +7,7 @@ class Attention(nn.Module):
     def __init__(
         self,
         heads: int = 8,
-        hidden_dim: int = 1024,
+        hidden_dim: int = 512,
     ):
         super().__init__()
         self.heads = heads
@@ -35,7 +35,7 @@ class Attention(nn.Module):
 class MLP(nn.Module):
     def __init__(
         self,
-        hidden_dim: int = 1024,
+        hidden_dim: int = 512,
         intermediate_ratio: float = 3.0,
     ):
         super().__init__()
@@ -81,7 +81,6 @@ class Conditioner(nn.Module):
         return embedding
 
     def forward(self, label: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
-        
         label = torch.where(torch.rand(label.shape, device=label.device) < self.condition_p, torch.tensor(self.num_classes, dtype=label.dtype, device=label.device), label)
         class_embedding = self.class_embedding(label)
         time_embedding = self.sinusodial_embedding(timestep)
@@ -91,7 +90,7 @@ class Conditioner(nn.Module):
 class Block(nn.Module):
     def __init__(
         self,
-        hidden_dim: int = 1024, 
+        hidden_dim: int = 512, 
         heads: int = 8,
         intermediate_ratio: float = 3.0,
     ):
@@ -110,8 +109,8 @@ class Block(nn.Module):
         rho_2 = scales[:,4*self.hidden_dim:5*self.hidden_dim]
         beta_2 = scales[:,5*self.hidden_dim:6*self.hidden_dim]
         residual = x
-        residual = self.attention(residual, alpha_1, rho_1, beta_1)
-        residual = self.mlp(residual, alpha_2, rho_2, beta_2)
+        residual = self.attention(residual, alpha_2, rho_2, beta_2)
+        residual = self.mlp(residual, alpha_1, rho_1, beta_1)
         return residual
 
 class AdaLN(nn.Module):
@@ -119,7 +118,7 @@ class AdaLN(nn.Module):
         self,
         embedding_dim: int = 256,
         hidden_dim: int = 1024,
-        intermediate_ratio: float = 3.0
+        intermediate_ratio: float = 2.0
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -137,7 +136,7 @@ class DiT(nn.Module):
     def __init__(
         self,
         num_blocks: int = 12,
-        hidden_dim: int = 1024, 
+        hidden_dim: int = 512, 
         heads: int = 8,
         img_size: int = 64,
         patches: int = 4,
@@ -166,7 +165,8 @@ class DiT(nn.Module):
         self.patch_len = num_patches * num_patches
         self.pos_embeddings = nn.Embedding(self.patch_len, self.hidden_dim)
         self.post_norm = nn.LayerNorm(self.hidden_dim)
-        self.up_proj = nn.Linear(self.hidden_dim, 64 * 6)
+        self.post_linear = nn.Linear(self.hidden_dim, patches * patches * 6)
+        self.upsample = nn.ConvTranspose2d(6, 6, 4, 2, 1)
 
     
     def forward(self, z: torch.Tensor, label: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -177,9 +177,12 @@ class DiT(nn.Module):
         for layer, embedding in zip(self.blocks, self.condition_blocks):
             scales = embedding(emb)
             hidden_states = layer(hidden_states, scales)
-        hidden_states = self.post_norm(hidden_states)
-        output = self.up_proj(hidden_states)
-        output = output.reshape((-1, 64, 64, 6))
-        noise = output[...,:3].transpose(1,-1)
-        sigma = output[...,3:].transpose(1,-1)
+        hidden_states = self.post_norm(hidden_states) 
+        hidden_states = self.post_linear(hidden_states) #B, 64, 1024 -> B, 64, 96
+        hidden_states = torch.reshape(hidden_states, (z.shape[0], 8, 8, 6, 6, 6))
+        hidden_states = hidden_states.permute(0, 1, 3, 2, 4, 5)
+        hidden_states  = hidden_states.reshape((-1, 6, 32, 32))
+        output = self.upsample(hidden_states)
+        noise = output[:,:3,...]
+        sigma = output[:,3:,...]
         return noise, sigma
