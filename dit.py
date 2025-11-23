@@ -179,8 +179,8 @@ class DiT(nn.Module):
             hidden_states = layer(hidden_states, scales)
         hidden_states = self.post_norm(hidden_states) 
         hidden_states = self.post_linear(hidden_states) #B, 64, 1024 -> B, 64, 96
-        hidden_states = torch.reshape(hidden_states, (z.shape[0], 8, 8, 6, 6, 6))
+        hidden_states = torch.reshape(hidden_states, (z.shape[0], 8, 8, 4, 4, 6))
         hidden_states = hidden_states.permute(0, 1, 3, 2, 4, 5)
-        hidden_states  = hidden_states.reshape((-1, 6, 32, 32))
+        hidden_states  = hidden_states.reshape((-1, 32, 32, 6)).transpose(1,-1)
         noise = self.upsample(hidden_states)
         return noise
