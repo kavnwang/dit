@@ -1,8 +1,8 @@
 {
-    "epochs": 200,
+    "epochs": 300,
     "batch_size": 256,
-    "lr": 1e-4,
-    "weight_decay": 0.0,
+    "lr": 2e-4,
+    "weight_decay": 0.01,
     "betas": [0.9, 0.999],
     "kl_weight": 3e-3,
     "adversarial_weight": 3e-3

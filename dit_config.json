@@ -1,0 +1,14 @@
+{
+    "num_blocks": 12,
+    "hidden_dim": 512,
+    "heads": 8,
+    "img_size": 64,
+    "patches": 8,
+    "T": 4000,
+    "eps": 1e-4,
+    "num_classes": 200,
+    "embedding_dim": 256,
+    "condition_p": 0.15,
+    "intermediate_ratio": 3.0,
+    "adaln_intermediate_ratio": 2.0
+}

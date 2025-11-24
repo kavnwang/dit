@@ -11,8 +11,10 @@ from torchvision.datasets import ImageFolder
 import math
 from typing import Tuple
 import os
-#dit_config = json.load(open('dit_config.json'))
+import sys
 
+
+dit_config = json.load(open('dit_config.json'))
 job = json.load(open('job_config.json'))
 
 
@@ -35,7 +37,21 @@ train_loader = torch.utils.data.DataLoader(
 )
 
 
-model = DiT().to(device)
+model = DiT(
+    num_blocks=dit_config['num_blocks'],
+    hidden_dim=dit_config['hidden_dim'], 
+    heads=dit_config['heads'], 
+    img_size=dit_config['img_size'], 
+    patches=dit_config['patches'], 
+    T=dit_config['T'], 
+    eps=dit_config['eps'], 
+    num_classes=dit_config['num_classes'], 
+    embedding_dim=dit_config['embedding_dim'], 
+    condition_p=dit_config['condition_p'], 
+    intermediate_ratio=dit_config['intermediate_ratio'], 
+    adaln_intermediate_ratio=dit_config['adaln_intermediate_ratio']
+).to(device)
+
 loss_mse = nn.MSELoss()
 
 def display_data(x: torch.Tensor, nrows: int, title: str):
@@ -68,7 +84,7 @@ def display_data(x: torch.Tensor, nrows: int, title: str):
 optimizer = torch.optim.AdamW(model.parameters(), lr=job['lr'], weight_decay=job['weight_decay'], betas=job['betas'])
 
 s = torch.linspace(0,1,4000+1)
-eps = 1e-3
+eps = dit_config['eps']
 alpha_bar = torch.cos(((s + eps) / (1 + eps)) * math.pi / 2) ** 2 
 alpha_bar = alpha_bar / alpha_bar[0]
 alpha_bar = alpha_bar.to(device)
@@ -81,29 +97,31 @@ def noise(z: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
 
 for epoch in range(job['epochs']):
     for step, (imgs, labels) in enumerate(tqdm(train_loader)):
-        imgs = imgs.to(device)
-        labels = labels.to(device)
-        t = torch.randint(0, 4000, (imgs.shape[0],)).to(device)
-        error, noised_z = noise(imgs, t)
-        noise_pred = model(noised_z, labels, t)
-        loss = loss_mse(noise_pred, error)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        if step == len(train_loader) - 1:
-            print(f"Epoch {epoch+1}/{job['epochs']}")
-            print(f"Loss: {loss.item()}")
+        for x in range(1):
+            imgs = imgs.to(device)
+            labels = labels.to(device)
+            t = torch.randint(0, dit_config['T'], (imgs.shape[0],)).to(device)
+            error, noised_z = noise(imgs, t)
+            noise_pred = model(noised_z, labels, t)
             alpha = alpha_bar[t][:,None,None,None].to(device)
-            output = (noised_z[:16] - (1 - alpha[:16]) ** 0.5 * noise_pred[:16]) / (alpha[:16] ** 0.5)
-            display_data(output, 4, f"Epoch {epoch+1} Output")
-            if (epoch) % 20 == 0:
-                checkpoint_dir = 'checkpoints'
-                os.makedirs(checkpoint_dir, exist_ok=True)
-                checkpoint_path = os.path.join(checkpoint_dir, f'dit_epoch_{epoch+1}.pt')
-                torch.save({
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'loss': loss.item(),
-                }, checkpoint_path)
-                print(f"Saved checkpoint to {checkpoint_path}")
+            output = (noised_z - (1 - alpha) ** 0.5 * noise_pred) / (alpha ** 0.5)
+            loss = loss_mse(noise_pred, error)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            if step % 10 == 0:
+                print(f"Loss: {loss.item()}")
+            if step == len(train_loader) - 1:
+                print(f"Epoch {epoch+1}/{job['epochs']}")
+                display_data(output[:16], 4, f"Epoch {epoch+1} Output")
+                if (epoch) % 20 == 0:
+                    checkpoint_dir = 'checkpoints'
+                    os.makedirs(checkpoint_dir, exist_ok=True)
+                    checkpoint_path = os.path.join(checkpoint_dir, f'dit_epoch_{epoch+1}.pt')
+                    torch.save({
+                        'epoch': epoch + 1,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'loss': loss.item(),
+                    }, checkpoint_path)
+                    print(f"Saved checkpoint to {checkpoint_path}")
