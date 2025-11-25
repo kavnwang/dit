@@ -73,6 +73,7 @@ class Conditioner(nn.Module):
         self.silu = nn.SiLU()
         self.time_down_proj = nn.Linear(self.time_intermediate_dim, self.embedding_dim)
         self.time_mlp = nn.Sequential(self.time_up_proj, self.silu, self.time_down_proj)
+        nn.init.zeros_(self.class_embedding.weight.data[num_classes])
 
     def sinusodial_embedding(self, timestep: torch.Tensor) -> torch.Tensor:
         half_dim = self.embedding_dim // 2

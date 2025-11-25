@@ -32,7 +32,7 @@ train_dataset = ImageFolder('./data/tiny-imagenet-200/train', transform=transfor
 
 train_loader = torch.utils.data.DataLoader(
     train_dataset,
-    batch_size=job['batch_size'],
+    batch_size=4,
     shuffle=True
 )
 
@@ -52,10 +52,12 @@ model = DiT(
     adaln_intermediate_ratio=dit_config['adaln_intermediate_ratio']
 ).to(device)
 
-checkpoint_epoch = 101
+checkpoint_epoch = 161
 
 checkpoint = torch.load(f'checkpoints/dit_epoch_{checkpoint_epoch}.pt', map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
+
+model.eval()
 
 loss_mse = nn.MSELoss()
 
@@ -64,14 +66,13 @@ def display_data(x: torch.Tensor, nrows: int, title: str):
     os.makedirs('outputs', exist_ok=True)
     
     x = x.detach().cpu()
-    
-    x = (x * 0.5) + 0.5
-    x = torch.clamp(x, 0, 1)
-    
     ncols = x.shape[0] // nrows
 
     # Rearrange to create a grid of images, keeping RGB channels
     y = rearrange(x, "(b1 b2) c h w -> (b1 h) (b2 w) c", b1=nrows)
+    
+    # Normalize to [0, 1] range
+    y = (y - y.min()) / (y.max() - y.min() + 1e-8)
     
     # Save using matplotlib
     fig, ax = plt.subplots(figsize=(ncols * 2, nrows * 2))
@@ -101,12 +102,12 @@ def noise(z: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
     noised_z = (alpha ** 0.5) * z + ((1 - alpha) ** 0.5) * noise
     return noise, noised_z
 
-for epoch in range(checkpoint_epoch, job['epochs'] + 1):
+for epoch in range(job['epochs']):
     for step, (imgs, labels) in enumerate(tqdm(train_loader)):
         for x in range(1):
             imgs = imgs.to(device)
             labels = labels.to(device)
-            t = torch.randint(0, dit_config['T'], (imgs.shape[0],)).to(device)
+            t = torch.randint(2000,2001, (imgs.shape[0],)).to(device)
             error, noised_z = noise(imgs, t)
             noise_pred = model(noised_z, labels, t)
             alpha = alpha_bar[t][:,None,None,None].to(device)
@@ -117,17 +118,6 @@ for epoch in range(checkpoint_epoch, job['epochs'] + 1):
             optimizer.zero_grad()
             if step % 10 == 0:
                 print(f"Loss: {loss.item()}")
-            if step == len(train_loader) - 1:
+            if step <= 10:
                 print(f"Epoch {epoch+1}/{job['epochs']}")
-                display_data(output[:16], 4, f"Epoch {epoch+1} Output")
-                if (epoch) % 20 == 0:
-                    checkpoint_dir = 'checkpoints'
-                    os.makedirs(checkpoint_dir, exist_ok=True)
-                    checkpoint_path = os.path.join(checkpoint_dir, f'dit_epoch_{epoch+1}.pt')
-                    torch.save({
-                        'epoch': epoch,
-                        'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'loss': loss.item(),
-                    }, checkpoint_path)
-                    print(f"Saved checkpoint to {checkpoint_path}")
+                display_data(output, 1, f"Epoch {epoch+1} Test {step}")
